@@ -36,11 +36,39 @@ def findCmakePath(cmakeVersion) {
 def reactNativeRootDir = project(':packages:react-native:ReactAndroid').projectDir.parent;
 def customDownloadDir = System.getenv("REACT_NATIVE_DOWNLOADS_DIR")
 def downloadsDir = customDownloadDir ? new File(customDownloadDir) : new File(reactNativeRootDir, "sdks/download")
+def dependencySource = (
+    findProperty("reactNativeDependenciesSource")
+        ?: "network"
+).toString().toLowerCase()
+if (!["local", "network"].contains(dependencySource)) {
+    throw new GradleException(
+        "Invalid reactNativeDependenciesSource '$dependencySource'. Expected 'local' or 'network'."
+    )
+}
+def useLocalDependencies = dependencySource == "local"
+def localHermesArchive = new File(
+    project(':packages:react-native:ReactAndroid').projectDir,
+    "3rd_pkgs/hermes.tar.gz"
+)
 
 // By default we are going to download and unzip hermes inside the /sdks/hermes folder
 // but you can provide an override for where the hermes source code is located.
-def overrideHermesDir = System.getenv("REACT_NATIVE_OVERRIDE_HERMES_DIR") != null
-def hermesDir = System.getenv("REACT_NATIVE_OVERRIDE_HERMES_DIR") ?: new File(reactNativeRootDir, "sdks/hermes")
+def environmentHermesDir = System.getenv("REACT_NATIVE_OVERRIDE_HERMES_DIR")
+def defaultHermesDir = new File(reactNativeRootDir, "sdks/hermes")
+def hasLocalHermesSource = new File(defaultHermesDir, "CMakeLists.txt").isFile()
+def useExistingLocalHermesSource =
+    useLocalDependencies && !localHermesArchive.isFile() && hasLocalHermesSource
+
+if (useLocalDependencies && !localHermesArchive.isFile() && !hasLocalHermesSource) {
+    throw new GradleException(
+        "Missing Hermes local dependency. Add ${localHermesArchive} " +
+            "or extract the Hermes source into ${defaultHermesDir}."
+    )
+}
+
+def overrideHermesDir =
+    environmentHermesDir != null || useExistingLocalHermesSource
+def hermesDir = environmentHermesDir ?: defaultHermesDir
 def hermesBuildDir = new File("$buildDir/hermes")
 def hermesCOutputBinary = new File("$buildDir/hermes/bin/hermesc")
 
@@ -77,6 +105,17 @@ task downloadHermes(type: Download) {
     useETag("all")
     retries(5)
     dest(new File(downloadsDir, "hermes.tar.gz"))
+}
+
+def prepareLocalHermesDependency = tasks.register("prepareLocalHermesDependency", Copy) {
+    onlyIf { useLocalDependencies && localHermesArchive.isFile() }
+    from(localHermesArchive)
+    into(downloadsDir)
+}
+
+if (useLocalDependencies) {
+    downloadHermes.dependsOn(prepareLocalHermesDependency)
+    downloadHermes.onlyIf { false }
 }
 
 task installArchives {

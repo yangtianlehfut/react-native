@@ -29,6 +29,18 @@ group = "com.facebook.react"
 // We then copy both the downloaded code and our custom makefiles and headers into third-party-ndk.
 // After that we build native code from src/main/jni with module path pointing at third-party-ndk.
 
+def dependencySource = (
+    findProperty("reactNativeDependenciesSource")
+        ?: "network"
+).toString().toLowerCase()
+if (!["local", "network"].contains(dependencySource)) {
+    throw new GradleException(
+        "Invalid reactNativeDependenciesSource '$dependencySource'. Expected 'local' or 'network'."
+    )
+}
+def useLocalDependencies = dependencySource == "local"
+def localDependenciesDir = new File(projectDir, "3rd_pkgs")
+
 def customDownloadsDir = System.getenv("REACT_NATIVE_DOWNLOADS_DIR")
 def downloadsDir = customDownloadsDir ? new File(customDownloadsDir) : new File("$buildDir/downloads")
 def thirdPartyNdkDir = new File("$buildDir/third-party-ndk")
@@ -258,6 +270,43 @@ final def preparePrefab = tasks.register("preparePrefab", PreparePrefabHeadersTa
 task createNativeDepsDirectories {
     downloadsDir.mkdirs()
     thirdPartyNdkDir.mkdirs()
+}
+
+def requiredLocalArchives = [
+    "boost_${BOOST_VERSION}.tar.gz",
+    "double-conversion-${DOUBLE_CONVERSION_VERSION}.tar.gz",
+    "fmt-${FMT_VERSION}.tar.gz",
+    "folly-${FOLLY_VERSION}.tar.gz",
+    "glog-${GLOG_VERSION}.tar.gz",
+    "gtest.tar.gz",
+    "libevent-${LIBEVENT_VERSION}.tar.gz",
+]
+
+if (useLocalDependencies) {
+    def missingArchives = requiredLocalArchives.findAll {
+        !new File(localDependenciesDir, it).isFile()
+    }
+    if (!missingArchives.isEmpty()) {
+        throw new GradleException(
+            "Missing React Native native dependency archives in ${localDependenciesDir}: " +
+                missingArchives.join(", ")
+        )
+    }
+}
+
+def prepareLocalNativeDependencies = tasks.register("prepareLocalNativeDependencies", Copy) {
+    onlyIf { useLocalDependencies }
+    from(localDependenciesDir) {
+        include(requiredLocalArchives)
+    }
+    into(downloadsDir)
+}
+
+if (useLocalDependencies) {
+    tasks.withType(Download).configureEach {
+        dependsOn(prepareLocalNativeDependencies)
+        onlyIf { false }
+    }
 }
 
 task downloadBoost(dependsOn: createNativeDepsDirectories, type: Download) {

@@ -154,3 +154,6 @@ package-lock.json
 
 # CircleCI
 .circleci/generated_config.yml
+
+# Large File
+packages/react-native/ReactAndroid/3rd_pkgs/boost_1_83_0.tar.gz
